@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mahalanobis Distance — Interactive Explainer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #2b2a27; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace; }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+    background: #4a4940; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: #c49a6c; cursor: pointer; border: 2px solid #2b2a27;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: #c49a6c;
+    cursor: pointer; border: 2px solid #2b2a27;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function boxMullerSeeded(rng) {
+  const u1 = rng();
+  const u2 = rng();
+  return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+}
+
+function generateCorrelatedData(n, sx, sy, corr, seed = 42) {
+  const rng = mulberry32(seed);
+  const points = [];
+  for (let i = 0; i < n; i++) {
+    const z1 = boxMullerSeeded(rng);
+    const z2 = boxMullerSeeded(rng);
+    const x = sx * z1;
+    const y = sy * (corr * z1 + Math.sqrt(1 - corr * corr) * z2);
+    points.push([x, y]);
+  }
+  return points;
+}
+
+function matInv2x2(m) {
+  const det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+  return [
+    [m[1][1] / det, -m[0][1] / det],
+    [-m[1][0] / det, m[0][0] / det],
+  ];
+}
+
+function mahalanobis(x, y, sigmaInv) {
+  const v = [x, y];
+  const t = [
+    sigmaInv[0][0] * v[0] + sigmaInv[0][1] * v[1],
+    sigmaInv[1][0] * v[0] + sigmaInv[1][1] * v[1],
+  ];
+  return Math.sqrt(v[0] * t[0] + v[1] * t[1]);
+}
+
+function euclidean(x, y) {
+  return Math.sqrt(x * x + y * y);
+}
+
+function ellipsePoints(sigmaInv, r, nPts = 80) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const theta = (2 * Math.PI * i) / nPts;
+    const cx = Math.cos(theta);
+    const cy = Math.sin(theta);
+    const a = sigmaInv[0][0] * cx * cx + (sigmaInv[0][1] + sigmaInv[1][0]) * cx * cy + sigmaInv[1][1] * cy * cy;
+    const scale = r / Math.sqrt(a);
+    pts.push([scale * cx, scale * cy]);
+  }
+  return pts;
+}
+
+const TAB_STYLE = (active) => ({
+  padding: "10px 20px",
+  cursor: "pointer",
+  background: active ? "#3d3d37" : "transparent",
+  color: active ? "#e8e4d9" : "#9b9688",
+  border: "none",
+  borderBottom: active ? "2px solid #c49a6c" : "2px solid transparent",
+  fontSize: 14,
+  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  fontWeight: active ? 600 : 400,
+  transition: "all 0.2s",
+  letterSpacing: "0.3px",
+});
+
+function Scene1() {
+  const [corr, setCorr] = useState(0.75);
+  const [probe, setProbe] = useState([2.5, -1.0]);
+  const [dragging, setDragging] = useState(false);
+  const svgRef = useRef(null);
+
+  const sx = 2.5, sy = 1.2;
+  const sigma = [
+    [sx * sx, corr * sx * sy],
+    [corr * sx * sy, sy * sy],
+  ];
+  const sigmaInv = matInv2x2(sigma);
+  const data = generateCorrelatedData(200, sx, sy, corr, 42);
+
+  const dM = mahalanobis(probe[0], probe[1], sigmaInv);
+  const dE = euclidean(probe[0], probe[1]);
+
+  const W = 480, H = 420;
+  const cx = W / 2, cy = H / 2;
+  const scale = 28;
+
+  const toSvg = (p) => [cx + p[0] * scale, cy - p[1] * scale];
+  const fromSvg = (sx_, sy_) => [(sx_ - cx) / scale, -(sy_ - cy) / scale];
+
+  const ellM = ellipsePoints(sigmaInv, dM, 100);
+  const ellMPath = ellM.map((p, i) => {
+    const [ex, ey] = toSvg(p);
+    return (i === 0 ? "M" : "L") + ex + "," + ey;
+  }).join(" ") + "Z";
+
+  const [px, py] = toSvg(probe);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!dragging || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const [wx, wy] = fromSvg(mx, my);
+    setProbe([Math.max(-7, Math.min(7, wx)), Math.max(-6, Math.min(6, wy))]);
+  }, [dragging]);
+
+  const handleTouchMove = useCallback((e) => {
+    if (!dragging || !svgRef.current) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = svgRef.current.getBoundingClientRect();
+    const mx = touch.clientX - rect.left;
+    const my = touch.clientY - rect.top;
+    const [wx, wy] = fromSvg(mx, my);
+    setProbe([Math.max(-7, Math.min(7, wx)), Math.max(-6, Math.min(6, wy))]);
+  }, [dragging]);
+
+  useEffect(() => {
+    const up = () => setDragging(false);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchend", up);
+    return () => { window.removeEventListener("mouseup", up); window.removeEventListener("touchend", up); };
+  }, []);
+
+  return (
+    React.createElement("div", null,
+      React.createElement("p", { style: { color: "#c4bfb2", fontSize: 13, lineHeight: 1.6, marginBottom: 16 } },
+        React.createElement("strong", { style: { color: "#e8e4d9" } }, "Drag the point"),
+        " to see how Euclidean (circle) and Mahalanobis (ellipse) distances differ. The Mahalanobis contour stretches along the data's natural spread — a point far along the correlation axis is \"closer\" than Euclidean suggests."
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" } },
+        React.createElement("svg", {
+          ref: svgRef, width: W, height: H,
+          style: { background: "#363530", borderRadius: 8, border: "1px solid #4a4940", cursor: dragging ? "grabbing" : "default", touchAction: "none" },
+          onMouseMove: handleMouseMove,
+          onTouchMove: handleTouchMove,
+        },
+          [-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7].map(v =>
+            React.createElement("g", { key: v },
+              React.createElement("line", { x1: cx+v*scale, y1: 0, x2: cx+v*scale, y2: H, stroke: "#3d3d37", strokeWidth: v===0?1.5:0.5 }),
+              React.createElement("line", { x1: 0, y1: cy-v*scale, x2: W, y2: cy-v*scale, stroke: "#3d3d37", strokeWidth: v===0?1.5:0.5 })
+            )
+          ),
+          data.map((p, i) => {
+            const [dx, dy] = toSvg(p);
+            return React.createElement("circle", { key: i, cx: dx, cy: dy, r: 2, fill: "#c49a6c", opacity: 0.25 });
+          }),
+          React.createElement("circle", { cx: cx, cy: cy, r: dE * scale, fill: "none", stroke: "#d98a7a", strokeWidth: 1.5, strokeDasharray: "6,4", opacity: 0.7 }),
+          React.createElement("path", { d: ellMPath, fill: "none", stroke: "#7aaf6e", strokeWidth: 2, opacity: 0.85 }),
+          React.createElement("line", { x1: cx, y1: cy, x2: px, y2: py, stroke: "#e8e4d9", strokeWidth: 1, strokeDasharray: "3,3", opacity: 0.4 }),
+          React.createElement("circle", { cx: px, cy: py, r: 8, fill: "#e8e4d9", stroke: "#c49a6c", strokeWidth: 2, style: { cursor: "grab" }, onMouseDown: () => setDragging(true), onTouchStart: () => setDragging(true) }),
+          React.createElement("circle", { cx: cx, cy: cy, r: 3, fill: "#e8e4d9", opacity: 0.6 })
+        ),
+        React.createElement("div", { style: { minWidth: 160 } },
+          React.createElement("div", { style: { marginBottom: 20 } },
+            React.createElement("label", { style: { color: "#9b9688", fontSize: 11, display: "block", marginBottom: 6 } }, "CORRELATION: " + corr.toFixed(2)),
+            React.createElement("input", { type: "range", min: -0.95, max: 0.95, step: 0.05, value: corr, onChange: (e) => setCorr(+e.target.value), style: { width: "100%" } })
+          ),
+          React.createElement("div", { style: { background: "#33322e", padding: 14, borderRadius: 8, border: "1px solid #4a4940" } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 } },
+              React.createElement("div", { style: { width: 12, height: 3, background: "#d98a7a", borderRadius: 1 } }),
+              React.createElement("span", { style: { color: "#d98a7a", fontSize: 12 } }, "Euclidean")
+            ),
+            React.createElement("div", { style: { color: "#e8e4d9", fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", marginBottom: 14 } }, dE.toFixed(2)),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 } },
+              React.createElement("div", { style: { width: 12, height: 3, background: "#7aaf6e", borderRadius: 1 } }),
+              React.createElement("span", { style: { color: "#7aaf6e", fontSize: 12 } }, "Mahalanobis")
+            ),
+            React.createElement("div", { style: { color: "#e8e4d9", fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", marginBottom: 14 } }, dM.toFixed(2)),
+            React.createElement("div", { style: { borderTop: "1px solid #4a4940", paddingTop: 10 } },
+              React.createElement("span", { style: { color: "#9b9688", fontSize: 11 } }, "RATIO (E/M)"),
+              React.createElement("div", { style: { color: "#d4a56a", fontSize: 18, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" } }, (dE / (dM + 1e-8)).toFixed(2) + "×")
+            )
+          ),
+          React.createElement("div", { style: { marginTop: 14, color: "#7a756a", fontSize: 11, lineHeight: 1.5 } }, "Point: (" + probe[0].toFixed(1) + ", " + probe[1].toFixed(1) + ")")
+        )
+      )
+    )
+  );
+}
+
+function Scene2() {
+  const sx = 2.2, sy = 1.0, corr = 0.7;
+  const sigma = [[sx*sx, corr*sx*sy],[corr*sx*sy, sy*sy]];
+  const sigmaInv = matInv2x2(sigma);
+  const data = generateCorrelatedData(150, sx, sy, corr, 77);
+  const threshold = 2.5;
+  const W = 480, H = 420;
+  const cx = W/2, cy = H/2, scale = 28;
+  const toSvg = (p) => [cx + p[0]*scale, cy - p[1]*scale];
+
+  const ellBound = ellipsePoints(sigmaInv, threshold, 100);
+  const ellPath = ellBound.map((p, i) => {
+    const [ex, ey] = toSvg(p);
+    return (i===0?"M":"L")+ex+","+ey;
+  }).join(" ")+"Z";
+
+  const classified = data.map(p => ({ p, dM: mahalanobis(p[0], p[1], sigmaInv), dE: euclidean(p[0], p[1]) }));
+  const mOutliers = classified.filter(c => c.dM > threshold).length;
+  const eRadius = threshold * Math.sqrt((sx*sx + sy*sy)/2);
+
+  return (
+    React.createElement("div", null,
+      React.createElement("p", { style: { color: "#c4bfb2", fontSize: 13, lineHeight: 1.6, marginBottom: 16 } },
+        React.createElement("strong", { style: { color: "#e8e4d9" } }, "Outlier detection"),
+        ": The elliptical Mahalanobis boundary adapts to the data shape. Points outside the ellipse are flagged as outliers — unlike a circular Euclidean boundary, it won't miss outliers along the narrow axis or falsely flag points along the spread."
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" } },
+        React.createElement("svg", { width: W, height: H, style: { background: "#363530", borderRadius: 8, border: "1px solid #4a4940" } },
+          [-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7].map(v =>
+            React.createElement("g", { key: v },
+              React.createElement("line", { x1: cx+v*scale, y1: 0, x2: cx+v*scale, y2: H, stroke: "#3d3d37", strokeWidth: v===0?1.5:0.5 }),
+              React.createElement("line", { x1: 0, y1: cy-v*scale, x2: W, y2: cy-v*scale, stroke: "#3d3d37", strokeWidth: v===0?1.5:0.5 })
+            )
+          ),
+          React.createElement("circle", { cx: cx, cy: cy, r: eRadius*scale, fill: "none", stroke: "#d98a7a", strokeWidth: 1, strokeDasharray: "4,4", opacity: 0.35 }),
+          React.createElement("path", { d: ellPath, fill: "#7aaf6e", fillOpacity: 0.04, stroke: "#7aaf6e", strokeWidth: 2, opacity: 0.7 }),
+          classified.map((c, i) => {
+            const [dx, dy] = toSvg(c.p);
+            const isOut = c.dM > threshold;
+            return React.createElement("circle", { key: i, cx: dx, cy: dy, r: isOut ? 4 : 2.5, fill: isOut ? "#d98a7a" : "#c49a6c", opacity: isOut ? 0.9 : 0.35, stroke: isOut ? "#d98a7a" : "none", strokeWidth: 1 });
+          }),
+          React.createElement("circle", { cx: cx, cy: cy, r: 3, fill: "#e8e4d9", opacity: 0.5 })
+        ),
+        React.createElement("div", { style: { background: "#33322e", padding: 16, borderRadius: 8, border: "1px solid #4a4940", minWidth: 150 } },
+          React.createElement("div", { style: { color: "#9b9688", fontSize: 11, marginBottom: 6 } }, "THRESHOLD"),
+          React.createElement("div", { style: { color: "#7aaf6e", fontSize: 20, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", marginBottom: 16 } }, threshold.toFixed(1) + "σ"),
+          React.createElement("div", { style: { color: "#9b9688", fontSize: 11, marginBottom: 6 } }, "OUTLIERS DETECTED"),
+          React.createElement("div", { style: { color: "#d98a7a", fontSize: 20, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", marginBottom: 16 } }, mOutliers + " / " + data.length),
+          React.createElement("div", { style: { borderTop: "1px solid #4a4940", paddingTop: 12, color: "#9b9688", fontSize: 11, lineHeight: 1.6 } },
+            React.createElement("span", { style: { color: "#7aaf6e" } }, "━"), " Mahalanobis boundary", React.createElement("br"),
+            React.createElement("span", { style: { color: "#d98a7a" } }, "╌"), " Euclidean boundary", React.createElement("br"),
+            React.createElement("span", { style: { color: "#d98a7a" } }, "●"), " Flagged outliers"
+          )
+        )
+      )
+    )
+  );
+}
+
+function Scene3() {
+  const steps = [
+    { step: "1", title: "Center the data", formula: "(x − μ)", desc: "Shift so the mean is at the origin. Now we're measuring deviation from center.", color: "#c49a6c" },
+    { step: "2", title: "Invert the covariance", formula: "Σ⁻¹", desc: "The inverse covariance 'whitens' the space — it undoes correlations and normalizes variances. Directions with high variance get compressed; low variance gets amplified.", color: "#7aaf6e" },
+    { step: "3", title: "Quadratic form", formula: "(x−μ)ᵀ Σ⁻¹ (x−μ)", desc: "This is a weighted inner product. It's like computing the squared Euclidean distance, but in the whitened space where all features are uncorrelated with unit variance.", color: "#d4a56a" },
+    { step: "4", title: "Square root", formula: "√(·)", desc: "Take the root to get an actual distance (not squared distance). The result is unitless and scale-invariant.", color: "#d98a7a" },
+  ];
+
+  return (
+    React.createElement("div", null,
+      React.createElement("p", { style: { color: "#c4bfb2", fontSize: 13, lineHeight: 1.6, marginBottom: 20 } },
+        React.createElement("strong", { style: { color: "#e8e4d9" } }, "Step-by-step"),
+        ": How the formula transforms a naive distance into a covariance-aware one."
+      ),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+        steps.map(s =>
+          React.createElement("div", { key: s.step, style: { display: "flex", gap: 14, alignItems: "flex-start", background: "#33322e", padding: 16, borderRadius: 8, border: "1px solid #4a4940", borderLeft: "3px solid " + s.color } },
+            React.createElement("div", { style: { width: 28, height: 28, borderRadius: "50%", background: s.color + "22", display: "flex", alignItems: "center", justifyContent: "center", color: s.color, fontSize: 14, fontWeight: 700, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" } }, s.step),
+            React.createElement("div", null,
+              React.createElement("div", { style: { color: "#e8e4d9", fontSize: 14, fontWeight: 600, marginBottom: 4 } }, s.title),
+              React.createElement("div", { style: { color: s.color, fontSize: 16, fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, marginBottom: 6, letterSpacing: 0.5 } }, s.formula),
+              React.createElement("div", { style: { color: "#9b9688", fontSize: 12, lineHeight: 1.5 } }, s.desc)
+            )
+          )
+        )
+      ),
+      React.createElement("div", { style: { marginTop: 20, padding: 16, background: "#3d3d37", borderRadius: 8, border: "1px solid #4a4940", textAlign: "center" } },
+        React.createElement("div", { style: { color: "#9b9688", fontSize: 11, marginBottom: 8, letterSpacing: 1 } }, "SPECIAL CASE"),
+        React.createElement("div", { style: { color: "#e8e4d9", fontSize: 14, lineHeight: 1.6 } },
+          "When Σ = I (identity matrix), Mahalanobis distance ",
+          React.createElement("strong", { style: { color: "#d4a56a" } }, "equals"),
+          " Euclidean distance.",
+          React.createElement("br"),
+          React.createElement("span", { style: { color: "#9b9688", fontSize: 12 } }, "Euclidean is just Mahalanobis with the assumption that all features are independent with equal variance.")
+        )
+      )
+    )
+  );
+}
+
+function MahalanobisExplainer() {
+  const [tab, setTab] = useState(0);
+  const tabs = ["Euclidean vs Mahalanobis", "Outlier Detection", "The Formula"];
+
+  return (
+    React.createElement("div", {
+      style: { maxWidth: 740, margin: "0 auto", padding: 24, fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace", background: "#2b2a27", minHeight: "100vh", color: "#e8e4d9" }
+    },
+      React.createElement("h1", {
+        style: { fontSize: 22, fontWeight: 700, marginBottom: 4, letterSpacing: "-0.5px", background: "linear-gradient(135deg, #c49a6c, #7aaf6e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }
+      }, "Mahalanobis Distance"),
+      React.createElement("p", { style: { color: "#7a756a", fontSize: 12, marginBottom: 20 } }, "Distance that knows your data's shape"),
+      React.createElement("div", { style: { display: "flex", borderBottom: "1px solid #4a4940", marginBottom: 20 } },
+        tabs.map((t, i) =>
+          React.createElement("button", { key: i, onClick: () => setTab(i), style: TAB_STYLE(tab === i) }, t)
+        )
+      ),
+      tab === 0 && React.createElement(Scene1),
+      tab === 1 && React.createElement(Scene2),
+      tab === 2 && React.createElement(Scene3)
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(MahalanobisExplainer));
+</script>
+</body>
+</html>

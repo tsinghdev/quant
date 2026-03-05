@@ -1,0 +1,40 @@
+:root {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  line-height: 1.7;
+  font-weight: 400;
+  color: #d4c5a9;
+  background-color: #1a1612;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+a {
+  color: #c9956b;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  color: #ddb08a;
+}
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: #e8dcc8;
+}
+
+code {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 0.9em;
+  background: #2a2218;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+}

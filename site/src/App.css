@@ -1,0 +1,71 @@
+.layout {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+}
+
+.site-title {
+  font-size: 1.6rem;
+  margin-bottom: 0.3rem;
+  color: #e8dcc8;
+}
+
+.site-subtitle {
+  color: #8a7d6b;
+  font-style: italic;
+  margin-top: 0;
+  margin-bottom: 3rem;
+  font-size: 0.95rem;
+}
+
+.topic-group {
+  margin-bottom: 2.5rem;
+}
+
+.topic-group h2 {
+  font-size: 1.15rem;
+  color: #a89880;
+  border-bottom: 1px solid #3a3228;
+  padding-bottom: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.topic-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.topic-list li {
+  margin-bottom: 0.6rem;
+}
+
+.topic-list a {
+  font-size: 1.05rem;
+}
+
+.topic-page h1 {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.topic-page p {
+  margin-bottom: 1.2rem;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 2rem;
+  font-size: 0.9rem;
+  color: #6b6052;
+}
+
+.back-link:hover {
+  color: #c9956b;
+}
+
+.topic-desc {
+  color: #6b6052;
+  font-size: 0.9rem;
+  font-style: italic;
+}
